@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Audiobook-Studio</title>
+    <link rel="stylesheet" href="./styles/global.css" />
+  </head>
+  <body>
+    <main id="app">
+      <header class="topbar">
+        <div>
+          <h1>Audiobook-Studio</h1>
+          <p id="statusText">Ready</p>
+        </div>
+        <nav class="tabs" aria-label="Main views">
+          <button class="tab active" data-view="batch">Batch</button>
+          <button class="tab" data-view="text">Text</button>
+          <button class="tab" data-view="settings">Settings</button>
+        </nav>
+      </header>
+
+      <section class="view active" id="view-batch">
+        <div class="dropzone" id="dropzone">
+          <strong>Drop .txt files or folders here</strong>
+          <span>or select files from your system</span>
+        </div>
+        <div class="toolbar">
+          <button id="selectFiles">Select Files</button>
+          <button id="selectFolder">Select Folder</button>
+          <button id="startBatch">Start</button>
+          <button id="pauseBatch">Pause</button>
+          <button id="resumeBatch">Resume</button>
+          <button id="cancelBatch" class="danger">Cancel</button>
+        </div>
+        <div class="fileList" id="fileList"></div>
+      </section>
+
+      <section class="view" id="view-text">
+        <textarea id="textInput" placeholder="Paste text here"></textarea>
+        <input id="textOutputName" placeholder="Output name, for example chapter-01.mp3" />
+        <textarea id="voiceInput" spellcheck="false"></textarea>
+        <div class="toolbar">
+          <button id="convertText">Convert Text</button>
+        </div>
+      </section>
+
+      <section class="view" id="view-settings">
+        <div class="settingsGrid">
+          <label>API Base URL<input id="apiBaseURL" /></label>
+          <label>API Token<input id="apiToken" type="password" /></label>
+          <label>Model<input id="model" /></label>
+          <label>Split Threshold<input id="splitThreshold" type="number" min="80" /></label>
+          <label>Concurrency<input id="concurrency" type="number" min="1" /></label>
+          <label>Output Directory<input id="outputDir" /></label>
+        </div>
+        <textarea id="configJSON" spellcheck="false"></textarea>
+        <div class="toolbar">
+          <button id="selectOutputDir">Choose Output</button>
+          <button id="saveConfig">Save Settings</button>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
