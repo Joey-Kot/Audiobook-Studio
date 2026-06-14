@@ -10,54 +10,90 @@
     <main id="app">
       <header class="topbar">
         <div>
-          <h1>Audiobook-Studio</h1>
-          <p id="statusText">Ready</p>
+          <h1 data-i18n="appTitle">Audiobook-Studio</h1>
+          <p id="statusText" data-status-key="ready">Ready</p>
         </div>
-        <nav class="tabs" aria-label="Main views">
-          <button class="tab active" data-view="batch">Batch</button>
-          <button class="tab" data-view="text">Text</button>
-          <button class="tab" data-view="settings">Settings</button>
-        </nav>
+        <div class="topActions">
+          <nav class="tabs" aria-label="Main views">
+            <button class="tab active" data-view="batch" data-i18n="tabBatch">Batch</button>
+            <button class="tab" data-view="text" data-i18n="tabText">Text</button>
+            <button class="tab" data-view="settings" data-i18n="tabSettings">Settings</button>
+          </nav>
+        </div>
       </header>
 
       <section class="view active" id="view-batch">
         <div class="dropzone" id="dropzone">
-          <strong>Drop .txt files or folders here</strong>
-          <span>or select files from your system</span>
+          <div class="dropzoneHint" id="dropzoneHint">
+            <strong data-i18n="dropFiles">Drop .txt files or folders here</strong>
+            <span data-i18n="selectFromSystem">or select files from your system</span>
+          </div>
+          <div class="pendingList" id="pendingList"></div>
         </div>
         <div class="toolbar">
-          <button id="selectFiles">Select Files</button>
-          <button id="selectFolder">Select Folder</button>
-          <button id="startBatch">Start</button>
-          <button id="pauseBatch">Pause</button>
-          <button id="resumeBatch">Resume</button>
-          <button id="cancelBatch" class="danger">Cancel</button>
+          <button id="selectFiles" data-i18n="selectFiles" data-i18n-title="selectFilesHint">Select Files</button>
+          <button id="selectFolder" data-i18n="selectFolder" data-i18n-title="selectFolderHint">Select Folder</button>
+          <button id="clearPending" data-i18n="clearList" data-i18n-title="clearListHint">Clear List</button>
+          <button id="startBatch" data-i18n="start" data-i18n-title="startHint">Start</button>
+          <button id="retryFailed" data-i18n="retryFailed" data-i18n-title="retryFailedHint" hidden>Retry Failed</button>
+          <button id="pauseBatch" data-i18n="pause" data-i18n-title="pauseHint">Pause</button>
+          <button id="resumeBatch" data-i18n="resume" data-i18n-title="resumeHint">Resume</button>
+          <button id="cancelBatch" class="danger" data-i18n="cancel" data-i18n-title="cancelHint">Cancel</button>
         </div>
         <div class="fileList" id="fileList"></div>
       </section>
 
       <section class="view" id="view-text">
-        <textarea id="textInput" placeholder="Paste text here"></textarea>
-        <input id="textOutputName" placeholder="Output name, for example chapter-01.mp3" />
-        <textarea id="voiceInput" spellcheck="false"></textarea>
+        <textarea id="textInput" placeholder="Paste text here" data-i18n-placeholder="textInputPlaceholder"></textarea>
+        <input id="textOutputName" placeholder="Output name, for example chapter-01.mp3" data-i18n-placeholder="textOutputPlaceholder" />
+        <div class="textProgress" id="textProgress"></div>
         <div class="toolbar">
-          <button id="convertText">Convert Text</button>
+          <button id="convertText" data-i18n="convertText" data-i18n-title="convertTextHint">Convert Text</button>
+          <button id="pauseText" data-i18n="pause" data-i18n-title="pauseHint">Pause</button>
+          <button id="resumeText" data-i18n="resume" data-i18n-title="resumeHint">Resume</button>
+          <button id="cancelText" class="danger" data-i18n="cancel" data-i18n-title="cancelHint">Cancel</button>
         </div>
       </section>
 
       <section class="view" id="view-settings">
         <div class="settingsGrid">
-          <label>API Base URL<input id="apiBaseURL" /></label>
-          <label>API Token<input id="apiToken" type="password" /></label>
-          <label>Model<input id="model" /></label>
-          <label>Split Threshold<input id="splitThreshold" type="number" min="80" /></label>
-          <label>Concurrency<input id="concurrency" type="number" min="1" /></label>
-          <label>Output Directory<input id="outputDir" /></label>
+          <label>
+            <span data-i18n="languageSetting">Language</span>
+            <select id="languageSelect">
+              <option value="en">English</option>
+              <option value="zh">中文</option>
+              <option value="ja">日本語</option>
+              <option value="de">Deutsch</option>
+              <option value="fr">Français</option>
+            </select>
+          </label>
+          <label><span data-i18n="apiBaseURL">API Base URL</span><input id="apiBaseURL" /></label>
+          <label><span data-i18n="apiToken">API Token</span><input id="apiToken" type="password" /></label>
+          <label><span data-i18n="model">Model</span><input id="model" /></label>
+          <label><span data-i18n="splitThreshold">Chunk Character Limit</span><input id="splitThreshold" type="number" min="11" /></label>
+          <label><span data-i18n="concurrency">Concurrency</span><input id="concurrency" type="number" min="1" /></label>
+          <label><span data-i18n="requestTimeout">Request Timeout</span><input id="requestTimeout" type="number" min="1" /></label>
+          <label><span data-i18n="outputBitrate">Output Bitrate KB</span><input id="outputBitrate" type="number" min="16" /></label>
+          <label class="wideField">
+            <span data-i18n="outputDirectory">Output Directory</span>
+            <span class="inputWithButton">
+              <input id="outputDir" />
+              <button id="selectOutputDir" type="button" data-i18n="chooseOutput" data-i18n-title="chooseOutputHint">Choose</button>
+            </span>
+          </label>
         </div>
-        <textarea id="configJSON" spellcheck="false"></textarea>
+        <section class="jsonSection">
+          <div class="sectionHeader">
+            <div>
+              <h2 data-i18n="requestOptionsJSON">Request Options JSON</h2>
+              <p data-i18n="requestOptionsHelp">Added to every TTS request body. Paste normal JSON here; no manual escaping is needed.</p>
+            </div>
+            <button id="formatVoiceJSON" data-i18n="formatJSON" data-i18n-title="formatJSONHint">Validate / Format JSON</button>
+          </div>
+          <textarea id="voiceInput" spellcheck="false"></textarea>
+        </section>
         <div class="toolbar">
-          <button id="selectOutputDir">Choose Output</button>
-          <button id="saveConfig">Save Settings</button>
+          <button id="saveConfig" data-i18n="saveSettings" data-i18n-title="saveSettingsHint">Save Settings</button>
         </div>
       </section>
     </main>

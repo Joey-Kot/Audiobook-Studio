@@ -1,3 +1,14 @@
+// Copyright (C) 2026 Joey Kot <joey.kot.x@gmail.com>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed WITHOUT ANY WARRANTY; without even the
+// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See <https://www.gnu.org/licenses/> for more details.
+
 package main
 
 import (
@@ -6,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"audiobook-studio/internal/batch"
@@ -38,10 +50,14 @@ type App struct {
 	running    bool
 	paused     bool
 	files      map[int]batch.BatchProgress
+	filePaths  map[int]string
 }
 
 func NewApp() *App {
-	return &App{files: map[int]batch.BatchProgress{}}
+	return &App{
+		files:     map[int]batch.BatchProgress{},
+		filePaths: map[int]string{},
+	}
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -115,6 +131,16 @@ func (a *App) StartBatch(paths []string) error {
 	a.running = true
 	a.paused = false
 	a.files = map[int]batch.BatchProgress{}
+	a.filePaths = map[int]string{}
+	for i, file := range files {
+		a.files[i] = batch.BatchProgress{
+			FileIndex: i,
+			FileName:  filepath.Base(file),
+			Percent:   0,
+			Status:    batch.StatusQueued,
+		}
+		a.filePaths[i] = file
+	}
 	manager := batch.NewManager(cfg, nil, nil, a.onProgress)
 	a.manager = manager
 	a.mu.Unlock()
@@ -166,6 +192,7 @@ func (a *App) ConvertText(text string, outputName string) error {
 	a.running = true
 	a.paused = false
 	a.files = map[int]batch.BatchProgress{}
+	a.filePaths = map[int]string{0: tmp.Name()}
 	manager := batch.NewManager(cfg, nil, nil, a.onProgress)
 	a.manager = manager
 	a.mu.Unlock()
@@ -204,6 +231,122 @@ func (a *App) CancelBatch() {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+func (a *App) CancelFile(fileIndex int) {
+	a.mu.Lock()
+	manager := a.manager
+	a.mu.Unlock()
+	if manager != nil {
+		manager.CancelFile(fileIndex)
+	}
+}
+
+func (a *App) RetryFile(fileIndex int) error {
+	a.mu.Lock()
+	if a.running {
+		a.mu.Unlock()
+		return fmt.Errorf("batch is already running")
+	}
+	path := a.filePaths[fileIndex]
+	if path == "" {
+		a.mu.Unlock()
+		return fmt.Errorf("file is no longer available for retry")
+	}
+	cfg := a.cfg
+	ctx, cancel := context.WithCancel(context.Background())
+	a.runID++
+	runID := a.runID
+	a.cancel = cancel
+	a.running = true
+	a.paused = false
+	a.files[fileIndex] = batch.BatchProgress{
+		FileIndex: fileIndex,
+		FileName:  filepath.Base(path),
+		Percent:   0,
+		Status:    batch.StatusQueued,
+	}
+	manager := batch.NewManager(cfg, nil, nil, a.onProgress)
+	a.manager = manager
+	a.mu.Unlock()
+
+	go func() {
+		err := manager.StartTasks(ctx, []batch.FileTask{{FileIndex: fileIndex, Path: path}})
+		a.mu.Lock()
+		a.running = false
+		a.paused = false
+		if a.runID == runID {
+			a.cancel = nil
+		}
+		a.mu.Unlock()
+		if err != nil {
+			a.emitError(err)
+		}
+		a.emitState()
+	}()
+	a.emitState()
+	return nil
+}
+
+func (a *App) RetryFailed() error {
+	a.mu.Lock()
+	if a.running {
+		a.mu.Unlock()
+		return fmt.Errorf("batch is already running")
+	}
+	var tasks []batch.FileTask
+	for index, progress := range a.files {
+		if progress.Status != batch.StatusError {
+			continue
+		}
+		path := a.filePaths[index]
+		if path == "" {
+			continue
+		}
+		tasks = append(tasks, batch.FileTask{FileIndex: index, Path: path})
+	}
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].FileIndex < tasks[j].FileIndex
+	})
+	if len(tasks) == 0 {
+		a.mu.Unlock()
+		return fmt.Errorf("no failed files to retry")
+	}
+	cfg := a.cfg
+	ctx, cancel := context.WithCancel(context.Background())
+	a.runID++
+	runID := a.runID
+	a.cancel = cancel
+	a.running = true
+	a.paused = false
+	for _, task := range tasks {
+		a.files[task.FileIndex] = batch.BatchProgress{
+			FileIndex: task.FileIndex,
+			FileName:  filepath.Base(task.Path),
+			Percent:   0,
+			Status:    batch.StatusQueued,
+		}
+	}
+	manager := batch.NewManager(cfg, nil, nil, a.onProgress)
+	a.manager = manager
+	a.mu.Unlock()
+
+	go func() {
+		err := manager.StartTasks(ctx, tasks)
+		a.mu.Lock()
+		a.running = false
+		a.paused = false
+		if a.runID == runID {
+			a.cancel = nil
+		}
+		a.mu.Unlock()
+		if err != nil {
+			a.emitError(err)
+		}
+		a.emitState()
+	}()
+	a.emitState()
+	return nil
 }
 
 func (a *App) PauseBatch() {

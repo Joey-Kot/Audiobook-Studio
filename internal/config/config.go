@@ -1,3 +1,14 @@
+// Copyright (C) 2026 Joey Kot <joey.kot.x@gmail.com>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed WITHOUT ANY WARRANTY; without even the
+// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See <https://www.gnu.org/licenses/> for more details.
+
 package config
 
 import (
@@ -6,6 +17,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"audiobook-studio/internal/splitter"
 )
 
 // Config holds all user-editable settings for CLI and GUI workflows.
@@ -29,7 +42,7 @@ func DefaultConfig() Config {
 		APIToken:        "",
 		Model:           "gpt-4o-mini-tts",
 		VoiceJSON:       `{"voice":"alloy","response_format":"mp3"}`,
-		SplitThreshold:  1200,
+		SplitThreshold:  splitter.DefaultThreshold,
 		OutputDir:       "output",
 		Concurrency:     2,
 		RequestTimeout:  120,
@@ -97,8 +110,8 @@ func Validate(cfg *Config) error {
 	if err := json.Unmarshal([]byte(cfg.VoiceJSON), &voice); err != nil {
 		return fmt.Errorf("VOICE_JSON must be valid JSON: %w", err)
 	}
-	if cfg.SplitThreshold < 80 {
-		return fmt.Errorf("SPLIT_THRESHOLD must be at least 80")
+	if cfg.SplitThreshold <= 10 {
+		return fmt.Errorf("SPLIT_THRESHOLD must be greater than 10")
 	}
 	if cfg.Concurrency < 1 {
 		return fmt.Errorf("CONCURRENCY must be at least 1")

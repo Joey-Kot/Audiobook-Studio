@@ -1,3 +1,14 @@
+// Copyright (C) 2026 Joey Kot <joey.kot.x@gmail.com>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed WITHOUT ANY WARRANTY; without even the
+// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See <https://www.gnu.org/licenses/> for more details.
+
 package batch
 
 import (
@@ -52,6 +63,13 @@ type AudioEncoder interface {
 	MergeToMP3(segments [][]byte, outputPath string) error
 }
 
+// FileTask is one stable-index file conversion request.
+type FileTask struct {
+	FileIndex  int
+	Path       string
+	OutputName string
+}
+
 // Manager coordinates batch text-to-audiobook jobs.
 type Manager struct {
 	cfg         config.Config
@@ -60,6 +78,7 @@ type Manager struct {
 	progress    func(BatchProgress)
 	cancelMu    sync.Mutex
 	cancel      context.CancelFunc
+	fileCancels map[int]context.CancelFunc
 	runID       int64
 	paused      atomic.Bool
 	pauseMu     sync.Mutex
@@ -80,18 +99,35 @@ func NewManager(cfg config.Config, synth Synthesizer, encoder AudioEncoder, prog
 		synth:       synth,
 		encoder:     encoder,
 		progress:    progress,
+		fileCancels: map[int]context.CancelFunc{},
 		pauseNotify: make(chan struct{}),
 	}
 }
 
-// Start processes the provided files in order.
+// Start processes the provided files concurrently while preserving file indexes.
 func (m *Manager) Start(ctx context.Context, files []string) error {
 	return m.StartWithNames(ctx, files, nil)
 }
 
-// StartWithNames processes the provided files in order with optional output base names.
+// StartWithNames processes the provided files concurrently with optional output base names.
 func (m *Manager) StartWithNames(ctx context.Context, files []string, outputNames map[string]string) error {
 	if len(files) == 0 {
+		return fmt.Errorf("no input files")
+	}
+	tasks := make([]FileTask, 0, len(files))
+	for i, file := range files {
+		outputName := ""
+		if outputNames != nil {
+			outputName = outputNames[file]
+		}
+		tasks = append(tasks, FileTask{FileIndex: i, Path: file, OutputName: outputName})
+	}
+	return m.StartTasks(ctx, tasks)
+}
+
+// StartTasks processes files while preserving caller-provided file indexes.
+func (m *Manager) StartTasks(ctx context.Context, tasks []FileTask) error {
+	if len(tasks) == 0 {
 		return fmt.Errorf("no input files")
 	}
 	if err := config.Validate(&m.cfg); err != nil {
@@ -102,11 +138,13 @@ func (m *Manager) StartWithNames(ctx context.Context, files []string, outputName
 	m.runID++
 	runID := m.runID
 	m.cancel = cancel
+	m.fileCancels = map[int]context.CancelFunc{}
 	m.cancelMu.Unlock()
 	defer func() {
 		m.cancelMu.Lock()
 		if m.runID == runID {
 			m.cancel = nil
+			m.fileCancels = map[int]context.CancelFunc{}
 		}
 		m.cancelMu.Unlock()
 		cancel()
@@ -116,21 +154,66 @@ func (m *Manager) StartWithNames(ctx context.Context, files []string, outputName
 	if err != nil {
 		return err
 	}
-	for i, file := range files {
-		if err := ctx.Err(); err != nil {
-			m.emit(BatchProgress{FileIndex: i, FileName: filepath.Base(file), Status: StatusCanceled, Message: err.Error()})
-			return err
-		}
-		if err := m.processFile(ctx, i, file, outputDir, outputNames[file]); err != nil {
-			if ctx.Err() != nil {
-				m.emit(BatchProgress{FileIndex: i, FileName: filepath.Base(file), Status: StatusCanceled, Message: ctx.Err().Error()})
-				return ctx.Err()
-			}
-			m.emit(BatchProgress{FileIndex: i, FileName: filepath.Base(file), Status: StatusError, Message: err.Error()})
-			return err
-		}
+	for _, task := range tasks {
+		m.emit(BatchProgress{FileIndex: task.FileIndex, FileName: filepath.Base(task.Path), Percent: 0, Status: StatusQueued})
 	}
-	return nil
+
+	concurrency := m.cfg.Concurrency
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	fileSlots := make(chan struct{}, concurrency)
+	ttsSlots := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	var firstErr error
+	var errMu sync.Mutex
+	recordError := func(err error) {
+		if err == nil {
+			return
+		}
+		errMu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		errMu.Unlock()
+	}
+
+	for _, task := range tasks {
+		fileCtx, fileCancel := context.WithCancel(ctx)
+		m.registerFileCancel(task.FileIndex, fileCancel)
+		wg.Add(1)
+		go func(task FileTask, fileCtx context.Context, fileCancel context.CancelFunc) {
+			defer wg.Done()
+			defer fileCancel()
+			defer m.unregisterFileCancel(task.FileIndex)
+			select {
+			case fileSlots <- struct{}{}:
+				defer func() { <-fileSlots }()
+			case <-fileCtx.Done():
+				m.emit(BatchProgress{FileIndex: task.FileIndex, FileName: filepath.Base(task.Path), Status: StatusCanceled, Message: fileCtx.Err().Error()})
+				return
+			}
+			if err := fileCtx.Err(); err != nil {
+				m.emit(BatchProgress{FileIndex: task.FileIndex, FileName: filepath.Base(task.Path), Status: StatusCanceled, Message: err.Error()})
+				return
+			}
+			if err := m.processFile(fileCtx, task.FileIndex, task.Path, outputDir, task.OutputName, ttsSlots); err != nil {
+				if fileCtx.Err() != nil {
+					m.emit(BatchProgress{FileIndex: task.FileIndex, FileName: filepath.Base(task.Path), Status: StatusCanceled, Message: fileCtx.Err().Error()})
+					return
+				}
+				m.emit(BatchProgress{FileIndex: task.FileIndex, FileName: filepath.Base(task.Path), Status: StatusError, Message: err.Error()})
+				recordError(err)
+			}
+		}(task, fileCtx, fileCancel)
+	}
+	wg.Wait()
+	errMu.Lock()
+	defer errMu.Unlock()
+	if firstErr != nil {
+		return firstErr
+	}
+	return ctx.Err()
 }
 
 // Cancel stops the current batch.
@@ -141,6 +224,28 @@ func (m *Manager) Cancel() {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+// CancelFile stops one file in the current batch by its stable file index.
+func (m *Manager) CancelFile(fileIndex int) {
+	m.cancelMu.Lock()
+	cancel := m.fileCancels[fileIndex]
+	m.cancelMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (m *Manager) registerFileCancel(fileIndex int, cancel context.CancelFunc) {
+	m.cancelMu.Lock()
+	m.fileCancels[fileIndex] = cancel
+	m.cancelMu.Unlock()
+}
+
+func (m *Manager) unregisterFileCancel(fileIndex int) {
+	m.cancelMu.Lock()
+	delete(m.fileCancels, fileIndex)
+	m.cancelMu.Unlock()
 }
 
 // Pause pauses between TTS work units.
@@ -159,7 +264,7 @@ func (m *Manager) Resume() {
 	}
 }
 
-func (m *Manager) processFile(ctx context.Context, fileIndex int, path string, outputDir string, outputName string) error {
+func (m *Manager) processFile(ctx context.Context, fileIndex int, path string, outputDir string, outputName string, ttsSlots chan struct{}) error {
 	name := filepath.Base(path)
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -200,7 +305,17 @@ func (m *Manager) processFile(ctx context.Context, fileIndex int, path string, o
 					}
 					return
 				}
+				select {
+				case ttsSlots <- struct{}{}:
+				case <-ctx.Done():
+					select {
+					case errCh <- ctx.Err():
+					default:
+					}
+					return
+				}
 				audio, err := m.synth.SynthesizeContext(ctx, j.text, m.cfg.VoiceJSON)
+				<-ttsSlots
 				if err != nil {
 					select {
 					case errCh <- fmt.Errorf("chunk %d: %w", j.index+1, err):

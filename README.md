@@ -37,10 +37,12 @@ The default `config.json` includes:
 - `API_TOKEN`: bearer token.
 - `MODEL`: TTS model name.
 - `VOICE_JSON`: JSON merged into every TTS request, for example `{"voice":"alloy","response_format":"mp3"}`.
-- `SPLIT_THRESHOLD`: approximate chunk size in runes.
+- `SPLIT_THRESHOLD`: configurable character limit used when splitting text into TTS chunks. The default is `300`, and the value must be greater than `10`.
 - `OUTPUT_DIR`: MP3 output directory.
 - `CONCURRENCY`: parallel TTS requests per file.
-- `FFMPEG_PATH`: ffmpeg executable.
+- `REQUEST_TIMEOUT`: TTS request timeout in seconds.
+- `OUTPUT_BITRATE_KB`: MP3 output bitrate in kbps.
+- `FFMPEG_PATH`: ffmpeg executable for CLI or non-CGO fallback builds. GitHub Actions GUI builds use the bundled static FFmpeg libraries.
 
 ## GUI
 
@@ -62,6 +64,14 @@ GUI builds use a trimmed static FFmpeg/libmp3lame CGO build produced by `scripts
 The static FFmpeg configuration decodes common TTS outputs including WAV, MP3, Opus/Ogg, AAC/M4A, and raw PCM. The audiobook output encoder is intentionally fixed to MP3 for now.
 
 Third-party dependency and license notes are tracked in `THIRD_PARTY_NOTICES.txt`. Release packages include `README.md`, `LICENSE`, and `THIRD_PARTY_NOTICES.txt`.
+
+## Runtime Requirements
+
+Release packages include `RUNNING.md` with platform notes.
+
+- Windows requires Microsoft Edge WebView2 Runtime. Run `Audiobook-Studio.exe` directly; the app is built with Wails' WebView2 download strategy and should prompt for WebView2 if it is missing.
+- Linux requires GTK 3 and WebKitGTK 4.0 runtime libraries. Use `check-linux-runtime.sh` from the Linux release package to check the current machine.
+- macOS uses the system WebKit framework and normally does not need a separate WebView runtime.
 
 The application icons live under `GUI/build/`:
 

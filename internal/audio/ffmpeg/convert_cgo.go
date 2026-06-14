@@ -1,5 +1,16 @@
 //go:build gui_ffmpeg_cgo
 
+// Copyright (C) 2026 Joey Kot <joey.kot.x@gmail.com>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed WITHOUT ANY WARRANTY; without even the
+// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See <https://www.gnu.org/licenses/> for more details.
+
 package ffmpeg
 
 /*
@@ -158,6 +169,20 @@ cleanup:
 }
 
 static enum AVSampleFormat audiobook_pick_sample_fmt(const AVCodec *codec) {
+#if LIBAVCODEC_VERSION_MAJOR >= 61
+	const enum AVSampleFormat *sample_fmts = NULL;
+	int sample_fmt_count = 0;
+	int ret = avcodec_get_supported_config(NULL, codec, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, (const void **)&sample_fmts, &sample_fmt_count);
+	if (ret >= 0 && sample_fmts != NULL && sample_fmt_count > 0) {
+		for (int i = 0; i < sample_fmt_count; i++) {
+			if (sample_fmts[i] == AV_SAMPLE_FMT_S16P) {
+				return sample_fmts[i];
+			}
+		}
+		return sample_fmts[0];
+	}
+	return AV_SAMPLE_FMT_S16P;
+#else
 	if (codec->sample_fmts == NULL) {
 		return AV_SAMPLE_FMT_S16P;
 	}
@@ -169,6 +194,7 @@ static enum AVSampleFormat audiobook_pick_sample_fmt(const AVCodec *codec) {
 		p++;
 	}
 	return codec->sample_fmts[0];
+#endif
 }
 
 static int audiobook_encode_pcm_to_mp3(const char *out_path, const uint8_t *pcm, int pcm_len, int sample_rate, int bitrate_kbps, char *errbuf, int errbuf_size) {

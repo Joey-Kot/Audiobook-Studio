@@ -209,7 +209,7 @@ jobs:
           case "${selected_ffmpeg_files}" in
             *convert_exec.go*) echo "GUI build selected external-process FFmpeg implementation" >&2; exit 1 ;;
           esac
-          wails build -clean -platform ${{ matrix.platform }} -tags gui_ffmpeg_cgo -ldflags='-s -w -extldflags "-static -static-libgcc -static-libstdc++"'
+          wails build -clean -platform ${{ matrix.platform }} -tags gui_ffmpeg_cgo -webview2 download -ldflags='-s -w -extldflags "-static -static-libgcc -static-libstdc++"'
 
       - name: Check Windows runtime DLL dependencies
         if: runner.os == 'Windows'
@@ -227,7 +227,10 @@ jobs:
         run: |
           mkdir -p dist/package
           cp -R "GUI/build/bin/${{ matrix.gui_binary }}" dist/package/
-          cp README.md LICENSE THIRD_PARTY_NOTICES.txt dist/package/
+          cp README.md LICENSE THIRD_PARTY_NOTICES.txt packaging/RUNNING.md dist/package/
+          if [ "${RUNNER_OS}" = "macOS" ]; then
+            cp packaging/macos/README-macOS.md dist/package/
+          fi
           cd dist/package
           python3 -m zipfile -c "../${{ matrix.archive }}" *
 
@@ -236,7 +239,9 @@ jobs:
         run: |
           mkdir -p dist/package
           cp "GUI/build/bin/${{ matrix.gui_binary }}" dist/package/
-          cp README.md LICENSE THIRD_PARTY_NOTICES.txt dist/package/
+          cp README.md LICENSE THIRD_PARTY_NOTICES.txt packaging/RUNNING.md dist/package/
+          cp packaging/linux/check-linux-runtime.sh dist/package/
+          chmod +x dist/package/check-linux-runtime.sh
           tar -C dist/package -czf "dist/${{ matrix.archive }}" .
 
       - name: Checksum
