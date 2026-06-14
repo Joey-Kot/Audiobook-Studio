@@ -41,7 +41,7 @@ jobs:
         os:
           - windows-latest
           - macos-latest
-          - ubuntu-latest
+          - ubuntu-22.04
 
     steps:
       - name: Checkout
@@ -58,12 +58,50 @@ jobs:
         with:
           node-version: 22
 
+      - name: Set up MSYS2
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: inherit
+
       - name: Install Linux GUI dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev || \
-          sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.0-dev
+          sudo apt-get install -y \
+            autoconf \
+            automake \
+            build-essential \
+            curl \
+            git \
+            libgtk-3-dev \
+            libtool \
+            libwebkit2gtk-4.0-dev \
+            nasm \
+            pkg-config \
+            yasm
+
+      - name: Install macOS FFmpeg CGO build dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install automake libtool nasm pkg-config yasm
+
+      - name: Install Windows FFmpeg CGO build dependencies
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          pacman --noconfirm -S --needed \
+            autoconf \
+            automake \
+            base-devel \
+            git \
+            libtool \
+            make \
+            mingw-w64-x86_64-gcc \
+            mingw-w64-x86_64-pkgconf \
+            nasm \
+            yasm
 
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.9.2
@@ -80,6 +118,60 @@ jobs:
         working-directory: GUI
         run: wails generate module
 
-      - name: Build GUI
+      - name: Build FFmpeg CGO dependencies
+        if: runner.os != 'Windows'
+        run: scripts/build-ffmpeg-static.sh
+
+      - name: Build Windows FFmpeg CGO dependencies
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: scripts/build-ffmpeg-windows-amd64.sh
+
+      - name: Build GUI with FFmpeg CGO
+        if: runner.os != 'Windows'
         working-directory: GUI
-        run: wails build -clean
+        run: |
+          export CGO_ENABLED=1
+          export PKG_CONFIG_ALLOW_CROSS=1
+          export PKG_CONFIG_PATH="${GITHUB_WORKSPACE}/build/ffmpeg-$(go env GOOS)-$(go env GOARCH)/lib/pkgconfig"
+          export CGO_CFLAGS="$(pkg-config --cflags libavformat libavcodec libswresample libavutil)"
+          ffmpeg_ldflags="$(pkg-config --libs --static libavformat libavcodec libswresample libavutil)"
+          if [ "${RUNNER_OS}" = "macOS" ]; then
+            export CGO_LDFLAGS="${ffmpeg_ldflags}"
+          else
+            export CGO_LDFLAGS="-Wl,--start-group ${ffmpeg_ldflags} -Wl,--end-group"
+          fi
+          selected_ffmpeg_files="$(go list -tags gui_ffmpeg_cgo -f '{{.GoFiles}} {{.CgoFiles}}' audiobook-studio/internal/audio/ffmpeg)"
+          echo "Selected ffmpeg files: ${selected_ffmpeg_files}"
+          case "${selected_ffmpeg_files}" in
+            *convert_cgo.go*) ;;
+            *) echo "GUI build did not select CGO FFmpeg implementation" >&2; exit 1 ;;
+          esac
+          case "${selected_ffmpeg_files}" in
+            *convert_exec.go*) echo "GUI build selected external-process FFmpeg implementation" >&2; exit 1 ;;
+          esac
+          wails build -clean -tags gui_ffmpeg_cgo
+
+      - name: Build Windows GUI with FFmpeg CGO
+        if: runner.os == 'Windows'
+        working-directory: GUI
+        shell: msys2 {0}
+        run: |
+          export CC=x86_64-w64-mingw32-gcc
+          export CGO_ENABLED=1
+          export PKG_CONFIG_ALLOW_CROSS=1
+          workspace="$(cygpath -u "${GITHUB_WORKSPACE}")"
+          export PKG_CONFIG_PATH="${workspace}/build/ffmpeg-windows-amd64/lib/pkgconfig"
+          export CGO_CFLAGS="$(pkg-config --cflags libavformat libavcodec libswresample libavutil)"
+          ffmpeg_ldflags="$(pkg-config --libs --static libavformat libavcodec libswresample libavutil)"
+          export CGO_LDFLAGS="-Wl,--start-group ${ffmpeg_ldflags} -Wl,--end-group"
+          selected_ffmpeg_files="$(go list -tags gui_ffmpeg_cgo -f '{{.GoFiles}} {{.CgoFiles}}' audiobook-studio/internal/audio/ffmpeg)"
+          echo "Selected ffmpeg files: ${selected_ffmpeg_files}"
+          case "${selected_ffmpeg_files}" in
+            *convert_cgo.go*) ;;
+            *) echo "GUI build did not select CGO FFmpeg implementation" >&2; exit 1 ;;
+          esac
+          case "${selected_ffmpeg_files}" in
+            *convert_exec.go*) echo "GUI build selected external-process FFmpeg implementation" >&2; exit 1 ;;
+          esac
+          wails build -clean -tags gui_ffmpeg_cgo

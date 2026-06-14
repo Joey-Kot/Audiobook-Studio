@@ -1,2 +1,5 @@
 Example-Project
 .cache/
+/build/
+/dist/
+GUI/build/bin/

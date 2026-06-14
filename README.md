@@ -57,6 +57,10 @@ wails dev
 
 This repository is intended to use GitHub Actions as the build authority. CI downloads Wails dependencies, builds the frontend, generates Wails bindings, and runs platform builds on Windows, macOS, and Linux.
 
+GUI builds use a trimmed static FFmpeg/libmp3lame CGO build produced by `scripts/build-ffmpeg-static.sh` and compile the app with the `gui_ffmpeg_cgo` tag on Windows, macOS, and Linux.
+
+The static FFmpeg configuration decodes common TTS outputs including WAV, MP3, Opus/Ogg, AAC/M4A, and raw PCM. The audiobook output encoder is intentionally fixed to MP3 for now.
+
 The application icons live under `GUI/build/`:
 
 - `GUI/build/appicon.png`

@@ -1,17 +1,10 @@
 package ffmpeg
 
-import (
-	"bytes"
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strconv"
-)
+import "fmt"
 
 const sampleRate = 24000
 
-// Encoder wraps the ffmpeg executable and output encoding settings.
+// Encoder wraps audio conversion settings.
 type Encoder struct {
 	Path            string
 	OutputBitrateKB int
@@ -38,16 +31,14 @@ func (e Encoder) DecodeToPCM(input []byte) ([]byte, int, error) {
 	if len(input) == 0 {
 		return nil, 0, fmt.Errorf("input audio is empty")
 	}
-	cmd := exec.Command(e.Path, "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-f", "s16le", "-acodec", "pcm_s16le", "-ac", "1", "-ar", strconv.Itoa(sampleRate), "pipe:1")
-	cmd.Stdin = bytes.NewReader(input)
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, 0, fmt.Errorf("ffmpeg decode failed: %w: %s", err, stderr.String())
+	pcm, rate, err := decodeToPCM(e, input)
+	if err == nil {
+		return pcm, rate, nil
 	}
-	return out.Bytes(), sampleRate, nil
+	if raw, rawErr := rawPCM(input); rawErr == nil {
+		return raw, sampleRate, nil
+	}
+	return nil, 0, err
 }
 
 // MergeToMP3 concatenates PCM segments and writes a single MP3.
@@ -63,22 +54,17 @@ func (e Encoder) MergeToMP3(segments [][]byte, outputPath string) error {
 	if outputPath == "" {
 		return fmt.Errorf("output path is empty")
 	}
-	var pcm bytes.Buffer
 	for i, segment := range segments {
 		if len(segment) == 0 {
 			return fmt.Errorf("segment %d is empty", i)
 		}
-		pcm.Write(segment)
 	}
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
-		return err
+	return mergeToMP3(e, segments, outputPath)
+}
+
+func rawPCM(input []byte) ([]byte, error) {
+	if len(input) < 2 || len(input)%2 != 0 {
+		return nil, fmt.Errorf("input is not valid s16le pcm")
 	}
-	cmd := exec.Command(e.Path, "-hide_banner", "-loglevel", "error", "-f", "s16le", "-acodec", "pcm_s16le", "-ac", "1", "-ar", strconv.Itoa(sampleRate), "-i", "pipe:0", "-codec:a", "libmp3lame", "-b:a", fmt.Sprintf("%dk", e.OutputBitrateKB), "-y", outputPath)
-	cmd.Stdin = bytes.NewReader(pcm.Bytes())
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ffmpeg encode failed: %w: %s", err, stderr.String())
-	}
-	return nil
+	return append([]byte(nil), input...), nil
 }
