@@ -199,7 +199,7 @@ jobs:
           export PKG_CONFIG_PATH="${workspace}/build/ffmpeg-windows-amd64/lib/pkgconfig"
           export CGO_CFLAGS="$(pkg-config --cflags libavformat libavcodec libswresample libavutil)"
           ffmpeg_ldflags="$(pkg-config --libs --static libavformat libavcodec libswresample libavutil)"
-          export CGO_LDFLAGS="-Wl,--start-group ${ffmpeg_ldflags} -Wl,--end-group"
+          export CGO_LDFLAGS="-static -static-libgcc -static-libstdc++ -Wl,--start-group ${ffmpeg_ldflags} -Wl,--end-group -lwinpthread"
           selected_ffmpeg_files="$(go list -tags gui_ffmpeg_cgo -f '{{.GoFiles}} {{.CgoFiles}}' audiobook-studio/internal/audio/ffmpeg)"
           echo "Selected ffmpeg files: ${selected_ffmpeg_files}"
           case "${selected_ffmpeg_files}" in
@@ -209,7 +209,17 @@ jobs:
           case "${selected_ffmpeg_files}" in
             *convert_exec.go*) echo "GUI build selected external-process FFmpeg implementation" >&2; exit 1 ;;
           esac
-          wails build -clean -platform ${{ matrix.platform }} -tags gui_ffmpeg_cgo
+          wails build -clean -platform ${{ matrix.platform }} -tags gui_ffmpeg_cgo -ldflags='-s -w -extldflags "-static -static-libgcc -static-libstdc++"'
+
+      - name: Check Windows runtime DLL dependencies
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          objdump -p GUI/build/bin/Audiobook-Studio.exe | grep 'DLL Name' || true
+          if objdump -p GUI/build/bin/Audiobook-Studio.exe | grep -E 'libwinpthread-|libgcc_|libstdc\\+\\+-'; then
+            echo "Windows binary still depends on MinGW runtime DLLs." >&2
+            exit 1
+          fi
 
       - name: Package zip
         if: runner.os != 'Linux'
