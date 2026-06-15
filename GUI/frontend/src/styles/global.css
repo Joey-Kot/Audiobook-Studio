@@ -72,6 +72,47 @@ p {
   gap: 10px;
 }
 
+.uploadMenu {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  width: max-content;
+  z-index: 2;
+}
+
+.uploadMenu > button,
+.uploadMenuFlyout button {
+  width: 100%;
+  white-space: nowrap;
+}
+
+.uploadMenuFlyout {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  display: grid;
+  min-width: 100%;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
+}
+
+.uploadMenu:hover .uploadMenuFlyout,
+.uploadMenu:focus-within .uploadMenuFlyout {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.uploadMenuDivider {
+  height: 0;
+  margin: 6px 12px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.45);
+}
+
 .topActions {
   display: flex;
   align-items: center;

@@ -19,7 +19,13 @@ const pendingList = $("#pendingList");
 const dropzoneHint = $("#dropzoneHint");
 const languageSelect = $("#languageSelect");
 const retryFailedButton = $("#retryFailed");
+const clearTasksButton = $("#clearTasks");
+const pauseBatchButton = $("#pauseBatch");
+const resumeBatchButton = $("#resumeBatch");
+const cancelBatchButton = $("#cancelBatch");
 let currentStatusKey = "ready";
+let appRunning = false;
+let appPaused = false;
 
 document.querySelectorAll(".tab").forEach((button) => {
   button.addEventListener("click", () => {
@@ -40,17 +46,7 @@ attachDragDrop(dropzone, (paths) => {
 
 $("#selectFiles").addEventListener("click", async () => {
   try {
-    selectedPaths = mergePaths(selectedPaths, await backend?.SelectTextFiles() || []);
-    renderPendingFiles(selectedPaths);
-  } catch (error) {
-    setStatus(error.message || String(error));
-  }
-});
-
-$("#selectFolder").addEventListener("click", async () => {
-  try {
-    const dir = await backend?.SelectInputDirectory();
-    selectedPaths = dir ? mergePaths(selectedPaths, [dir]) : selectedPaths;
+    selectedPaths = mergePaths(selectedPaths, await backend?.SelectTextFilesAndDirectory() || []);
     renderPendingFiles(selectedPaths);
   } catch (error) {
     setStatus(error.message || String(error));
@@ -60,7 +56,7 @@ $("#selectFolder").addEventListener("click", async () => {
 dropzone.addEventListener("dblclick", async () => {
   if (selectedPaths.length > 0) return;
   try {
-    selectedPaths = await backend?.SelectTextFiles() || [];
+    selectedPaths = await backend?.SelectTextFilesAndDirectory() || [];
     renderPendingFiles(selectedPaths);
   } catch (error) {
     setStatus(error.message || String(error));
@@ -79,7 +75,7 @@ $("#startBatch").addEventListener("click", async () => {
     activeMode = "batch";
     batchProgress.clear();
     fileList.innerHTML = "";
-    updateRetryFailedVisibility();
+    updateBatchControls();
     selectedPaths.forEach((path, index) => updateProgress({
       fileIndex: index,
       fileName: path.split(/[\\/]/).pop(),
@@ -100,14 +96,30 @@ $("#clearPending").addEventListener("click", () => {
   renderPendingFiles(selectedPaths);
 });
 
-$("#pauseBatch").addEventListener("click", () => backend?.PauseBatch());
-$("#resumeBatch").addEventListener("click", () => backend?.ResumeBatch());
-$("#cancelBatch").addEventListener("click", () => backend?.CancelBatch());
+clearTasksButton.addEventListener("click", async () => {
+  try {
+    await backend?.ClearFinishedTasks();
+  } catch (error) {
+    setStatus(error.message || String(error));
+    return;
+  }
+  Array.from(batchProgress.entries()).forEach(([fileIndex, progress]) => {
+    if (isTerminal(progress.status)) {
+      batchProgress.delete(fileIndex);
+      document.querySelector(`[data-file-index="${fileIndex}"]`)?.remove();
+    }
+  });
+  updateBatchControls();
+});
+
+pauseBatchButton.addEventListener("click", () => backend?.PauseBatch());
+resumeBatchButton.addEventListener("click", () => backend?.ResumeBatch());
+cancelBatchButton.addEventListener("click", () => backend?.CancelBatch());
 $("#retryFailed").addEventListener("click", async () => {
   try {
     activeMode = "batch";
     await backend?.RetryFailed();
-    updateRetryFailedVisibility();
+    updateBatchControls();
     setStatusKey("running");
   } catch (error) {
     setStatus(error.message || String(error));
@@ -180,26 +192,29 @@ runtime?.EventsOn?.("batch:progress", (progress) => {
     renderTextProgress(progress);
   } else {
     updateProgress(progress);
-    updateRetryFailedVisibility();
+    updateBatchControls();
   }
 });
 runtime?.EventsOn?.("app:error", (message) => setStatus(message));
 runtime?.EventsOn?.("app:state", (state) => {
+  appRunning = !!state?.running;
+  appPaused = !!state?.paused;
   if (state?.files && activeMode === "batch") {
     batchProgress.clear();
     fileList.innerHTML = "";
     state.files.forEach(updateProgress);
-    updateRetryFailedVisibility();
+    updateBatchControls();
   } else if (state?.files && activeMode === "text" && state.files[0]) {
     textProgress = state.files[0];
     renderTextProgress(textProgress);
   }
+  updateBatchControls();
   setStatusKey(state?.running ? (state.paused ? "paused" : "running") : "ready");
 });
 
 async function init() {
   applyTranslations();
-  updateRetryFailedVisibility();
+  updateBatchControls();
   try {
     configPayload = await backend?.LoadConfig();
     hydrateConfig(configPayload);
@@ -272,6 +287,7 @@ function renderPendingFiles(paths) {
     `;
     pendingList.appendChild(item);
   });
+  updateBatchControls();
 }
 
 function mergePaths(existing, next) {
@@ -303,6 +319,7 @@ function updateProgress(progress) {
     ${renderProgress(progress.percent || 0)}
     ${renderRowActions(progress)}
   `;
+  updateBatchControls();
 }
 
 function renderRowActions(progress) {
@@ -386,7 +403,7 @@ function applyTranslations() {
     Array.from(batchProgress.values())
       .sort((a, b) => a.fileIndex - b.fileIndex)
       .forEach(updateProgress);
-    updateRetryFailedVisibility();
+    updateBatchControls();
   }
   if (textProgress) {
     renderTextProgress(textProgress);
@@ -401,8 +418,17 @@ function isTerminal(status) {
   return status === "done" || status === "canceled" || status === "error";
 }
 
-function updateRetryFailedVisibility() {
-  retryFailedButton.hidden = !Array.from(batchProgress.values()).some((progress) => progress.status === "error");
+function updateBatchControls() {
+  const tasks = Array.from(batchProgress.values());
+  const hasFailedTask = tasks.some((progress) => progress.status === "error");
+  const hasTerminalTask = tasks.some((progress) => isTerminal(progress.status));
+  const hasActiveTask = tasks.some((progress) => !isTerminal(progress.status));
+
+  clearTasksButton.hidden = !hasTerminalTask;
+  pauseBatchButton.hidden = !appRunning || appPaused || !hasActiveTask;
+  resumeBatchButton.hidden = !appRunning || !appPaused || !hasActiveTask;
+  cancelBatchButton.hidden = !appRunning || !hasActiveTask;
+  retryFailedButton.hidden = !hasFailedTask;
 }
 
 function escapeHTML(value) {

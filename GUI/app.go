@@ -371,14 +371,29 @@ func (a *App) ResumeBatch() {
 	a.emitState()
 }
 
+func (a *App) ClearFinishedTasks() {
+	a.mu.Lock()
+	for index, progress := range a.files {
+		if progress.Status == batch.StatusDone || progress.Status == batch.StatusError || progress.Status == batch.StatusCanceled {
+			delete(a.files, index)
+			delete(a.filePaths, index)
+		}
+	}
+	a.mu.Unlock()
+	a.emitState()
+}
+
 func (a *App) GetState() AppState {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	files := make([]batch.BatchProgress, 0, len(a.files))
-	for i := 0; i < len(a.files); i++ {
-		if p, ok := a.files[i]; ok {
-			files = append(files, p)
-		}
+	indexes := make([]int, 0, len(a.files))
+	for index := range a.files {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	for _, index := range indexes {
+		files = append(files, a.files[index])
 	}
 	return AppState{Running: a.running, Paused: a.paused, Files: files, Config: a.cfg}
 }
