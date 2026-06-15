@@ -53,6 +53,15 @@ $("#selectFiles").addEventListener("click", async () => {
   }
 });
 
+$("#selectFilesAlt").addEventListener("click", async () => {
+  try {
+    selectedPaths = mergePaths(selectedPaths, await backend?.SelectTextFiles() || []);
+    renderPendingFiles(selectedPaths);
+  } catch (error) {
+    setStatus(error.message || String(error));
+  }
+});
+
 $("#selectFolder").addEventListener("click", async () => {
   try {
     const dir = await backend?.SelectInputDirectory();
